@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>실시간 출퇴근 기록기</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Noto Sans KR', sans-serif; }
+        .record-entry { animation: slideIn 0.3s ease-out; }
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateX(-10px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen p-4 md:p-8">
+
+    <div class="max-w-4xl mx-auto space-y-6">
+        <!-- 상단 헤더 -->
+        <header class="text-center py-6">
+            <h1 class="text-3xl font-bold text-slate-800">Attendance System</h1>
+            <p id="liveClock" class="text-indigo-600 font-mono text-xl mt-2 font-semibold">00:00:00</p>
+        </header>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            
+            <!-- 왼쪽: 기록 입력 섹션 -->
+            <div class="md:col-span-1 space-y-4">
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                    <h2 class="text-lg font-bold mb-4 text-slate-700">기록하기</h2>
+                    
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-600 mb-1">이름</label>
+                            <input type="text" id="userName" placeholder="이름 입력" 
+                                class="w-full p-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition">
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-2">
+                            <button onclick="saveRecord('출근')" class="bg-indigo-600 text-white p-4 rounded-xl font-bold hover:bg-indigo-700 transition active:scale-95">출근</button>
+                            <button onclick="saveRecord('퇴근')" class="bg-rose-500 text-white p-4 rounded-xl font-bold hover:bg-rose-600 transition active:scale-95">퇴근</button>
+                            <button onclick="saveRecord('외출')" class="bg-amber-500 text-white p-4 rounded-xl font-bold hover:bg-amber-600 transition active:scale-95 text-sm">외출</button>
+                            <button onclick="saveRecord('복귀')" class="bg-emerald-500 text-white p-4 rounded-xl font-bold hover:bg-emerald-600 transition active:scale-95 text-sm">복귀</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-indigo-50 p-4 rounded-xl border border-indigo-100">
+                    <p class="text-xs text-indigo-700 leading-relaxed">
+                        * 이름 입력 후 버튼을 누르세요.<br>
+                        * 데이터는 실시간으로 클라우드에 저장됩니다.
+                    </p>
+                </div>
+            </div>
+
+            <!-- 오른쪽: 실시간 기록 목록 섹션 -->
+            <div class="md:col-span-2">
+                <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                    <div class="p-6 border-b border-slate-100 flex justify-between items-center bg-white sticky top-0">
+                        <h2 class="text-lg font-bold text-slate-700">실시간 기록 현황</h2>
+                        <span id="recordCount" class="bg-slate-100 text-slate-600 px-3 py-1 rounded-full text-xs font-bold">0건</span>
+                    </div>
+
+                    <div id="recordList" class="divide-y divide-slate-50 max-h-[600px] overflow-y-auto">
+                        <!-- 데이터 로딩 메시지 -->
+                        <div class="p-10 text-center text-slate-400">
+                            데이터를 불러오는 중입니다...
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase SDK (v10+) -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getFirestore, collection, addDoc, serverTimestamp, query, orderBy, onSnapshot, limit } 
+        from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+        // 🔥 본인의 Firebase 설정값을 여기에 붙여넣으세요!
+        const firebaseConfig = {
+  apiKey: "AIzaSyCe2KfcQiILJNXbkfH1KMJVXlb6HBmRlpU",
+  authDomain: "test7-876ec.firebaseapp.com",
+  projectId: "test7-876ec",
+  storageBucket: "test7-876ec.firebasestorage.app",
+  messagingSenderId: "507395441057",
+  appId: "1:507395441057:web:16ff2564ca7d0654ef8be0"
+};
+
+        // Firebase 초기화
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const recordsCol = collection(db, "commute_records");
+
+        // 1. 시계 업데이트 함수
+        function updateClock() {
+            const now = new Date();
+            document.getElementById('liveClock').textContent = now.toLocaleTimeString('ko-KR', { hour12: false });
+        }
+        setInterval(updateClock, 1000);
+        updateClock();
+
+        // 2. 데이터 저장 함수
+        window.saveRecord = async (type) => {
+            const nameInput = document.getElementById('userName');
+            const name = nameInput.value.trim();
+
+            if (!name) {
+                alert("이름을 입력해주세요!");
+                nameInput.focus();
+                return;
+            }
+
+            try {
+                await addDoc(recordsCol, {
+                    name: name,
+                    type: type,
+                    timestamp: serverTimestamp()
+                });
+                console.log(`${type} 기록 완료`);
+                // 이름 유지를 원치 않으면 아래 주석 해제
+                // nameInput.value = ""; 
+            } catch (e) {
+                console.error("저장 실패: ", e);
+                alert("기록 저장 중 오류가 발생했습니다.");
+            }
+        };
+
+        // 3. 실시간 데이터 리스너 (onSnapshot)
+        const q = query(recordsCol, orderBy("timestamp", "desc"), limit(50));
+        
+        onSnapshot(q, (snapshot) => {
+            const recordList = document.getElementById('recordList');
+            const countBadge = document.getElementById('recordCount');
+            
+            if (snapshot.empty) {
+                recordList.innerHTML = `<div class="p-10 text-center text-slate-400">표시할 기록이 없습니다.</div>`;
+                countBadge.textContent = "0건";
+                return;
+            }
+
+            recordList.innerHTML = "";
+            countBadge.textContent = `${snapshot.size}건`;
+
+            snapshot.forEach((doc) => {
+                const data = doc.data();
+                const time = data.timestamp ? data.timestamp.toDate() : new Date();
+                const timeString = time.toLocaleString('ko-KR', { 
+                    month: '2-digit', day: '2-digit', 
+                    hour: '2-digit', minute: '2-digit', second: '2-digit',
+                    hour12: false 
+                });
+
+                // 타입별 색상 설정
+                const typeColors = {
+                    '출근': 'bg-indigo-100 text-indigo-700',
+                    '퇴근': 'bg-rose-100 text-rose-700',
+                    '외출': 'bg-amber-100 text-amber-700',
+                    '복귀': 'bg-emerald-100 text-emerald-700'
+                };
+
+                const html = `
+                    <div class="p-4 flex items-center justify-between record-entry hover:bg-slate-50 transition">
+                        <div class="flex items-center space-x-4">
+                            <div class="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center font-bold text-slate-600">
+                                ${data.name.charAt(0)}
+                            </div>
+                            <div>
+                                <p class="font-bold text-slate-800">${data.name}</p>
+                                <p class="text-xs text-slate-400">${timeString}</p>
+                            </div>
+                        </div>
+                        <span class="px-3 py-1 rounded-full text-xs font-bold ${typeColors[data.type] || 'bg-slate-100'}">
+                            ${data.type}
+                        </span>
+                    </div>
+                `;
+                recordList.insertAdjacentHTML('beforeend', html);
+            });
+        });
+
+    </script>
+</body>
+</html>
